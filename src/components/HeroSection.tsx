@@ -37,11 +37,16 @@ export const HeroSection: React.FC<HeroSectionProps> = ({ state, onLaunchGame })
 
         {/* Functional Hero Buttons */}
         <div className="hero-buttons-row">
-          <a href="#city3d-section" className="btn btn-primary btn-xl hero-btn-glow" style={{ background: 'var(--purple)', color: '#fff' }}>
+          <button
+            onClick={handlePlayClick}
+            className="btn btn-primary btn-xl hero-btn-glow"
+            style={{ background: 'var(--purple)', color: '#fff' }}
+            type="button"
+          >
+            <Play size={20} style={{ marginRight: '8px' }} /> PLAY CRISIS COMMANDER
+          </button>
+          <a href="#city3d-section" className="btn btn-ghost btn-xl">
             <Compass size={20} style={{ marginRight: '8px' }} /> EXPLORE 3D CITY MAP
-          </a>
-          <a href="#protocols-section" className="btn btn-ghost btn-xl">
-            <Cpu size={20} style={{ marginRight: '8px' }} /> VIEW AI PROTOCOLS
           </a>
         </div>
 

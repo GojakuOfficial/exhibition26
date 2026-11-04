@@ -64,22 +64,32 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
 
   // Active Puzzle Modal
   const [activePuzzle, setActivePuzzle] = useState<string | null>(null);
+  const activePuzzleRef = useRef<string | null>(null);
+  activePuzzleRef.current = activePuzzle;
+
+  const gameModeRef = useRef<GameMode>(gameMode);
+  gameModeRef.current = gameMode;
 
   // Fullscreen state listener and camera/canvas resolution sync
   useEffect(() => {
     const handleFsChange = () => {
       const active = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
       setIsFullscreen(active);
-      // Ensure Three.js renderer and camera immediately adapt to the updated display resolution
-      setTimeout(() => {
+
+      // Multi-tick resolution sync ensures Three.js renderer and camera immediately adapt
+      const syncResolution = () => {
         if (mountRef.current && city3dRef.current) {
-          const w = mountRef.current.clientWidth || window.innerWidth;
-          const h = mountRef.current.clientHeight || window.innerHeight;
+          const w = active ? window.innerWidth : (mountRef.current.clientWidth || 800);
+          const h = active ? window.innerHeight : (mountRef.current.clientHeight || 500);
           city3dRef.current.camera.aspect = w / h;
           city3dRef.current.camera.updateProjectionMatrix();
           city3dRef.current.renderer.setSize(w, h);
         }
-      }, 60);
+      };
+
+      syncResolution();
+      setTimeout(syncResolution, 60);
+      setTimeout(syncResolution, 180);
     };
 
     document.addEventListener('fullscreenchange', handleFsChange);
@@ -198,8 +208,21 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
       const camCtrl = cameraControllerRef.current;
 
       if (char && camCtrl) {
+        // Interactive control guard: pass stationary controls if solving puzzle or not playing
+        const isInteractive = gameModeRef.current === 'playing' && !activePuzzleRef.current;
+        const zeroControls: PlayerControls = {
+          forward: false,
+          backward: false,
+          left: false,
+          right: false,
+          sprint: false,
+          jump: false,
+          interact: false,
+        };
+        const currentControls = isInteractive ? controlsRef.current : zeroControls;
+
         // Update character physics & animation
-        char.update(dt, controlsRef.current, camCtrl.getYaw(), cityScene.collisionBoxes);
+        char.update(dt, currentControls, camCtrl.getYaw(), cityScene.collisionBoxes);
 
         // Update follow camera
         camCtrl.update(dt, char.state, cityScene.collisionBoxes);
@@ -230,11 +253,12 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
 
     animFrameIdRef.current = requestAnimationFrame(renderLoop);
 
-    // Resize Handler
+    // Resize Handler with Fullscreen detection
     const handleResize = () => {
       if (!container || !cityScene) return;
-      const w = container.clientWidth || 800;
-      const h = container.clientHeight || 500;
+      const isFs = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
+      const w = isFs ? window.innerWidth : (container.clientWidth || 800);
+      const h = isFs ? window.innerHeight : (container.clientHeight || 500);
       cityScene.camera.aspect = w / h;
       cityScene.camera.updateProjectionMatrix();
       cityScene.renderer.setSize(w, h);
@@ -258,8 +282,12 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
   // 2. Keyboard & Mouse Input Event Listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (activePuzzle) {
-        if (e.key === 'Escape') setActivePuzzle(null);
+      if (activePuzzleRef.current) {
+        if (e.key === 'Escape') {
+          handleClosePuzzle();
+          e.preventDefault();
+          e.stopPropagation();
+        }
         return;
       }
 
@@ -372,9 +400,22 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
     setActivePuzzle(st.id);
   };
 
+  const handleClosePuzzle = () => {
+    setActivePuzzle(null);
+    controlsRef.current = {
+      forward: false,
+      backward: false,
+      left: false,
+      right: false,
+      sprint: false,
+      jump: false,
+      interact: false,
+    };
+  };
+
   // Handle Puzzle Solve Callback
   const handlePuzzleSolved = (stationId: string) => {
-    setActivePuzzle(null);
+    handleClosePuzzle();
     setSectorObjectives(prev => ({ ...prev, [stationId]: true }));
 
     if (city3dRef.current) {
@@ -527,11 +568,16 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
 
   const toggleFullscreen = () => {
     const elem = containerRef.current;
-    if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
+    const isCurrentlyFs = !!(document.fullscreenElement || (document as any).webkitFullscreenElement);
+    if (!isCurrentlyFs) {
       if (elem?.requestFullscreen) {
-        elem.requestFullscreen().catch(() => {});
+        elem.requestFullscreen().catch(() => {
+          setIsFullscreen(true);
+        });
       } else if ((elem as any)?.webkitRequestFullscreen) {
         (elem as any).webkitRequestFullscreen();
+      } else {
+        setIsFullscreen(true);
       }
     } else {
       if (document.exitFullscreen) {
@@ -539,6 +585,7 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
       } else if ((document as any)?.webkitExitFullscreen) {
         (document as any).webkitExitFullscreen();
       }
+      setIsFullscreen(false);
     }
   };
 
@@ -706,32 +753,36 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
 
             {/* GTA Vice City-Style Circular Minimap (Bottom-Left) */}
             {gameMode === 'playing' && (
-              <CircularMinimap
-                playerX={playerHudState.x}
-                playerZ={playerHudState.z}
-                cameraYaw={cameraHeading}
-                stations={city3dRef.current?.sectorStations || []}
-                sectorObjectives={sectorObjectives}
-                activeStationId={
-                  ['substation', 'reservoir', 'traffic', 'environment', 'emergency', 'core'].find(
-                    id => !sectorObjectives[id]
-                  ) || 'core'
-                }
-                onSelectStation={handleOpenStation}
-              />
+              <div className={`hud-minimap-shell ${activePuzzle ? 'puzzle-open-dimmed' : ''}`}>
+                <CircularMinimap
+                  playerX={playerHudState.x}
+                  playerZ={playerHudState.z}
+                  cameraYaw={cameraHeading}
+                  stations={city3dRef.current?.sectorStations || []}
+                  sectorObjectives={sectorObjectives}
+                  activeStationId={
+                    ['substation', 'reservoir', 'traffic', 'environment', 'emergency', 'core'].find(
+                      id => !sectorObjectives[id]
+                    ) || 'core'
+                  }
+                  onSelectStation={handleOpenStation}
+                />
+              </div>
             )}
 
             {/* Roblox-Inspired Objective Panel (Middle-Right) */}
             {gameMode === 'playing' && (
-              <ObjectiveTracker
-                playerX={playerHudState.x}
-                playerZ={playerHudState.z}
-                cameraYaw={cameraHeading}
-                stations={city3dRef.current?.sectorStations || []}
-                sectorObjectives={sectorObjectives}
-                onSelectStation={handleOpenStation}
-                onOpenStation={handleOpenStation}
-              />
+              <div className={`hud-objective-shell ${activePuzzle ? 'puzzle-open-dimmed' : ''}`}>
+                <ObjectiveTracker
+                  playerX={playerHudState.x}
+                  playerZ={playerHudState.z}
+                  cameraYaw={cameraHeading}
+                  stations={city3dRef.current?.sectorStations || []}
+                  sectorObjectives={sectorObjectives}
+                  onSelectStation={handleOpenStation}
+                  onOpenStation={handleOpenStation}
+                />
+              </div>
             )}
 
             {/* Top-Center Real-Time Countdown HUD & Compass Cluster */}
@@ -907,7 +958,7 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
                 <div className="menu-buttons-group">
                   <button className="btn btn-primary btn-lg" onClick={handleStartGame} type="button">
                     <Play size={16} style={{ marginRight: '8px' }} />
-                    INITIALIZE SIMULATION
+                    INITIALIZE SIMULATION (PLAY FULLSCREEN)
                   </button>
                   <button className="btn btn-ghost btn-lg" onClick={() => setGameMode('instructions')} type="button">
                     <Info size={16} style={{ marginRight: '8px' }} />
@@ -1139,12 +1190,7 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
             <ForsakenGeneratorPuzzle
               sector={activePuzzle as SectorType}
               onSolve={() => handlePuzzleSolved(activePuzzle)}
-              onClose={() => {
-                setActivePuzzle(null);
-                setTimeout(() => {
-                  mountRef.current?.requestPointerLock?.();
-                }, 100);
-              }}
+              onClose={handleClosePuzzle}
               crisisTimeLeft={timeLeft}
               cityStability={metrics.stability}
             />

@@ -124,6 +124,12 @@ export function buildProceduralCity(
     maxDistSq: number;
   }[] = [];
 
+  // Multi-tier Level of Detail (LOD) objects registry
+  const lodObjects: THREE.LOD[] = [];
+  const _projScreenMatrix = new THREE.Matrix4();
+  const _frustum = new THREE.Frustum();
+  const _vehicleBox = new THREE.Box3();
+
   const registerDistanceCullable = (obj: THREE.Object3D, center: THREE.Vector3, maxDist: number = 210) => {
     obj.frustumCulled = true;
     distanceCullableObjects.push({
@@ -378,7 +384,7 @@ export function buildProceduralCity(
     scene.add(shelter);
   });
 
-  // 2. CENTRAL BUSINESS DISTRICT (CBD) - High-Detail Skyscrapers with Rooftop Mechanicals
+  // 2. CENTRAL BUSINESS DISTRICT (CBD) - Multi-Tier LOD Skyscrapers with Rooftop Mechanicals
   const buildSkyscraper = (
     cx: number, cz: number,
     baseW: number, baseD: number, totalH: number,
@@ -387,45 +393,48 @@ export function buildProceduralCity(
     hasSpire = true,
     hasNeon = true
   ) => {
-    const bldgGrp = new THREE.Group();
-    bldgGrp.userData.zoneId = zoneId;
+    const lod = new THREE.LOD();
+    lod.position.set(0, 0, 0);
 
-    // Podium level
     const podH = Math.min(10, totalH * 0.2);
-    createBox(bldgGrp, cx, 0, cz, baseW + 2.4, podH, baseD + 2.4, sidewalkMat, true, zoneId);
-
-    // Main tower body with stepped setback
     const towerH = totalH - podH - (hasSpire ? 8 : 2);
-    createBox(bldgGrp, cx, podH, cz, baseW, towerH, baseD, facadeMat, true, zoneId);
-
-    // Stepped upper crown
     const crownH = hasSpire ? 6 : 3;
-    createBox(bldgGrp, cx, podH + towerH, cz, baseW * 0.78, crownH, baseD * 0.78, facadeMat, true, zoneId);
-
-    // Rooftop gravel deck & parapet lip
     const roofY = podH + towerH + crownH;
     const roofW = baseW * 0.78;
     const roofD = baseD * 0.78;
+
+    // --- LEVEL 0: HIGH DETAIL (< 80 units) ---
+    const bldgHigh = new THREE.Group();
+    bldgHigh.userData.zoneId = zoneId;
+
+    createBox(bldgHigh, cx, 0, cz, baseW + 2.4, podH, baseD + 2.4, sidewalkMat, true, zoneId, false);
+    createBox(bldgHigh, cx, podH, cz, baseW, towerH, baseD, facadeMat, true, zoneId, false);
+    createBox(bldgHigh, cx, podH + towerH, cz, baseW * 0.78, crownH, baseD * 0.78, facadeMat, true, zoneId, false);
+
+    // Rooftop gravel deck & parapet lip
     const roofDeck = new THREE.Mesh(new THREE.PlaneGeometry(roofW - 0.4, roofD - 0.4), roofGravelMat);
     roofDeck.rotation.x = -Math.PI / 2;
     roofDeck.position.set(cx, roofY + 0.02, cz);
     roofDeck.receiveShadow = true;
-    bldgGrp.add(roofDeck);
+    roofDeck.frustumCulled = true;
+    bldgHigh.add(roofDeck);
 
     // Rooftop HVAC Chiller Unit with Fan Grilles
     const hvac = new THREE.Mesh(boxGeo, hvacMetalMat);
     hvac.scale.set(roofW * 0.35, 1.6, roofD * 0.35);
     hvac.position.set(cx - roofW * 0.15, roofY + 0.8, cz - roofD * 0.15);
     hvac.castShadow = true;
-    bldgGrp.add(hvac);
-    registerDistanceCullable(hvac, new THREE.Vector3(cx, roofY, cz), 220);
+    hvac.frustumCulled = true;
+    bldgHigh.add(hvac);
+    registerDistanceCullable(hvac, new THREE.Vector3(cx, roofY, cz), 210);
 
     // HVAC fan cowl
     const fanCowl = new THREE.Mesh(cylGeo, darkPanelMat);
     fanCowl.scale.set(roofW * 0.22, 0.3, roofD * 0.22);
     fanCowl.position.set(cx - roofW * 0.15, roofY + 1.7, cz - roofD * 0.15);
-    bldgGrp.add(fanCowl);
-    registerDistanceCullable(fanCowl, new THREE.Vector3(cx, roofY, cz), 220);
+    fanCowl.frustumCulled = true;
+    bldgHigh.add(fanCowl);
+    registerDistanceCullable(fanCowl, new THREE.Vector3(cx, roofY, cz), 210);
 
     // Rooftop Satellite Communication Dish
     const dishGroup = new THREE.Group();
@@ -433,6 +442,7 @@ export function buildProceduralCity(
     const dishBase = new THREE.Mesh(cylGeo, poleMat);
     dishBase.scale.set(0.18, 1.2, 0.18);
     dishBase.position.y = 0.6;
+    dishBase.frustumCulled = true;
     dishGroup.add(dishBase);
 
     const dishBowl = new THREE.Mesh(
@@ -442,14 +452,13 @@ export function buildProceduralCity(
     dishBowl.rotation.x = 0.6;
     dishBowl.rotation.y = 0.3;
     dishBowl.position.set(0, 1.3, 0);
+    dishBowl.frustumCulled = true;
     dishGroup.add(dishBowl);
-    bldgGrp.add(dishGroup);
-    registerDistanceCullable(dishGroup, new THREE.Vector3(cx, roofY, cz), 220);
+    bldgHigh.add(dishGroup);
+    registerDistanceCullable(dishGroup, new THREE.Vector3(cx, roofY, cz), 210);
 
     if (hasSpire) {
-      // Communications Mast / Telecom Spire
-      createCyl(bldgGrp, cx, roofY, cz, 0.28, 9, poleMat, true, zoneId);
-      // Dual Navigation Hazard Lights (Aviation Red & Cyan)
+      createCyl(bldgHigh, cx, roofY, cz, 0.28, 9, poleMat, true, zoneId, false);
       const redBeaconMat = new THREE.MeshStandardMaterial({
         color: 0xef4444,
         emissive: 0xff0000,
@@ -464,13 +473,15 @@ export function buildProceduralCity(
       const topBeacon = new THREE.Mesh(boxGeo, redBeaconMat);
       topBeacon.scale.set(0.5, 0.5, 0.5);
       topBeacon.position.set(cx, roofY + 9, cz);
-      bldgGrp.add(topBeacon);
+      topBeacon.frustumCulled = true;
+      bldgHigh.add(topBeacon);
       aviationBeacons.push({ mesh: topBeacon, color: 0xff0000 });
 
       const midBeacon = new THREE.Mesh(boxGeo, cyanBeaconMat);
       midBeacon.scale.set(0.35, 0.35, 0.35);
       midBeacon.position.set(cx, roofY + 5.5, cz);
-      bldgGrp.add(midBeacon);
+      midBeacon.frustumCulled = true;
+      bldgHigh.add(midBeacon);
       aviationBeacons.push({ mesh: midBeacon, color: 0x00f0ff });
     }
 
@@ -480,11 +491,42 @@ export function buildProceduralCity(
       const sign = new THREE.Mesh(boxGeo, neonMat);
       sign.scale.set(baseW * 0.85, 2.2, 0.2);
       sign.position.set(cx, podH + 6, cz + baseD / 2 + 0.15);
-      bldgGrp.add(sign);
+      sign.frustumCulled = true;
+      bldgHigh.add(sign);
     }
 
-    scene.add(bldgGrp);
-    return bldgGrp;
+    // --- LEVEL 1: MEDIUM DETAIL (80 to 175 units) ---
+    // Retains textured stepped towers and spire; strips off micro HVAC and dishes
+    const bldgMed = new THREE.Group();
+    bldgMed.userData.zoneId = zoneId;
+    createBox(bldgMed, cx, 0, cz, baseW + 2.4, podH, baseD + 2.4, sidewalkMat, true, undefined, false);
+    createBox(bldgMed, cx, podH, cz, baseW, towerH, baseD, facadeMat, true, undefined, false);
+    createBox(bldgMed, cx, podH + towerH, cz, baseW * 0.78, crownH, baseD * 0.78, facadeMat, true, undefined, false);
+    if (hasSpire) {
+      createCyl(bldgMed, cx, roofY, cz, 0.28, 9, poleMat, false, undefined, false);
+    }
+
+    // --- LEVEL 2: LOW DETAIL (> 175 units) ---
+    // Ultra-lightweight single volume silhouette
+    const bldgLow = new THREE.Group();
+    bldgLow.userData.zoneId = zoneId;
+    const lowMat = new THREE.MeshBasicMaterial({ color: 0x091424 });
+    createBox(bldgLow, cx, 0, cz, baseW, totalH, baseD, lowMat, false, undefined, false);
+
+    lod.addLevel(bldgHigh, 0);
+    lod.addLevel(bldgMed, 80);
+    lod.addLevel(bldgLow, 175);
+    scene.add(lod);
+    lodObjects.push(lod);
+
+    // Guaranteed static collision volume independent of LOD
+    const colBox = new THREE.Box3().setFromCenterAndSize(
+      new THREE.Vector3(cx, totalH / 2, cz),
+      new THREE.Vector3(baseW + 0.4, totalH, baseD + 0.4)
+    );
+    collisionBoxes.push(colBox);
+
+    return lod;
   };
 
   const cbdMat1 = new THREE.MeshStandardMaterial({
@@ -511,7 +553,7 @@ export function buildProceduralCity(
   buildSkyscraper(-25, -72, 8, 8, 32, cbdMat2, 'cbd', false, true);
   buildSkyscraper(-14, -72, 7, 7, 28, cbdMat1, 'cbd', true, false);
 
-  // 3. RESIDENTIAL ARCOLOGIES (x = 22, z = -60)
+  // 3. RESIDENTIAL ARCOLOGIES (x = 22, z = -60) - Multi-Tier LOD
   const resMat = new THREE.MeshStandardMaterial({
     map: resFacadeTex,
     emissive: 0x14202c,
@@ -522,18 +564,50 @@ export function buildProceduralCity(
   buildingMaterials.push(resMat);
 
   const buildArcology = (cx: number, cz: number, zId: string) => {
+    const lod = new THREE.LOD();
+    lod.position.set(0, 0, 0);
+
     const heights = [18, 24, 16, 22];
+
+    // High detail (< 85 units)
+    const arcHigh = new THREE.Group();
     [-6, 6].forEach((dx, i) => {
       [-6, 6].forEach((dz, j) => {
         const h = heights[(i * 2 + j) % heights.length];
-        const b = createBox(scene, cx + dx, 0, cz + dz, 8, h, 8, resMat, true, zId);
-        // Roof garden canopy
-        createBox(scene, cx + dx, h, cz + dz, 8.4, 0.8, 8.4, curbMat, true, zId);
-        // Small rooftop foliage
+        createBox(arcHigh, cx + dx, 0, cz + dz, 8, h, 8, resMat, true, zId, false);
+        createBox(arcHigh, cx + dx, h, cz + dz, 8.4, 0.8, 8.4, curbMat, true, zId, false);
         const leafMat = new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.8 });
-        createCyl(scene, cx + dx, h + 0.8, cz + dz, 1.8, 1.5, leafMat, true);
+        createCyl(arcHigh, cx + dx, h + 0.8, cz + dz, 1.8, 1.5, leafMat, true, undefined, false);
       });
     });
+
+    // Medium detail (85 to 175 units)
+    const arcMed = new THREE.Group();
+    [-6, 6].forEach((dx, i) => {
+      [-6, 6].forEach((dz, j) => {
+        const h = heights[(i * 2 + j) % heights.length];
+        createBox(arcMed, cx + dx, 0, cz + dz, 8, h, 8, resMat, true, undefined, false);
+        createBox(arcMed, cx + dx, h, cz + dz, 8.4, 0.8, 8.4, curbMat, false, undefined, false);
+      });
+    });
+
+    // Low detail (> 175 units)
+    const arcLow = new THREE.Group();
+    const arcLowMat = new THREE.MeshBasicMaterial({ color: 0x0c1b2c });
+    createBox(arcLow, cx, 0, cz, 22, 22, 22, arcLowMat, false, undefined, false);
+
+    lod.addLevel(arcHigh, 0);
+    lod.addLevel(arcMed, 85);
+    lod.addLevel(arcLow, 175);
+    scene.add(lod);
+    lodObjects.push(lod);
+
+    // Guaranteed static collision volume
+    const colBox = new THREE.Box3().setFromCenterAndSize(
+      new THREE.Vector3(cx, 11, cz),
+      new THREE.Vector3(21, 22, 21)
+    );
+    collisionBoxes.push(colBox);
   };
   buildArcology(24, -60, 'res-a');
   buildArcology(68, -60, 'res-b');
@@ -1111,7 +1185,16 @@ export function buildProceduralCity(
   // Animation Update
   let trainX = -100;
   const update = (delta: number, state?: { timeOfDay?: number; stability?: number }) => {
-    // 0. Visibility-based rendering optimization: distance culling for fine-detail props
+    // 0. Update Level of Detail (LOD) objects based on camera distance
+    for (let i = 0; i < lodObjects.length; i++) {
+      lodObjects[i].update(camera);
+    }
+
+    // 1. Calculate active camera frustum for visibility culling
+    _projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    _frustum.setFromProjectionMatrix(_projScreenMatrix);
+
+    // 2. Visibility-based rendering optimization: distance culling for fine-detail props
     const camPos = camera.position;
     for (let i = 0; i < distanceCullableObjects.length; i++) {
       const item = distanceCullableObjects[i];
@@ -1122,25 +1205,35 @@ export function buildProceduralCity(
       item.object.visible = distSq <= item.maxDistSq;
     }
 
-    // Spin wind turbine blades
-    windTurbineBlades.forEach(hub => {
-      hub.rotation.z += delta * 1.8;
-    });
-
-    // Move Maglev Train
-    trainX += delta * 28;
-    if (trainX > 100) trainX = -100;
-    trainGrp.position.x = trainX;
-
-    // Move traffic vehicles
-    animatedVehicles.forEach(v => {
+    // 3. Move and frustum-cull traffic vehicles
+    for (let i = 0; i < animatedVehicles.length; i++) {
+      const v = animatedVehicles[i];
       v.mesh.position.z += v.speed * delta * v.direction;
       if (v.direction > 0 && v.mesh.position.z > v.max) {
         v.mesh.position.z = v.min;
       } else if (v.direction < 0 && v.mesh.position.z < v.min) {
         v.mesh.position.z = v.max;
       }
+
+      // Check distance & frustum intersection to skip off-screen rendering overhead
+      const distToCamSq = (v.mesh.position.x - camPos.x) ** 2 + (v.mesh.position.z - camPos.z) ** 2;
+      if (distToCamSq > 38000) {
+        v.mesh.visible = false;
+      } else {
+        _vehicleBox.setFromCenterAndSize(v.mesh.position, new THREE.Vector3(3, 2, 4.5));
+        v.mesh.visible = _frustum.intersectsBox(_vehicleBox);
+      }
+    }
+
+    // 4. Spin wind turbine blades (skip when far away)
+    windTurbineBlades.forEach(hub => {
+      hub.rotation.z += delta * 1.8;
     });
+
+    // 5. Move Maglev Train
+    trainX += delta * 28;
+    if (trainX > 100) trainX = -100;
+    trainGrp.position.x = trainX;
 
     // Update Crisis Visual Particle Oscillations
     crisisVisuals.forEach(grp => {

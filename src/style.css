@@ -3981,4 +3981,22 @@ ul { margin: 0; padding: 0; list-style: none; }
   opacity: 0.35;
 }
 
+/* Dimmed Side HUDs when in-world holographic puzzle terminal is active */
+.puzzle-open-dimmed,
+.puzzle-open-dimmed .gta-minimap-container,
+.puzzle-open-dimmed .roblox-objective-panel {
+  opacity: 0.18 !important;
+  pointer-events: none !important;
+  filter: grayscale(0.4) !important;
+  transform: scale(0.96) !important;
+  transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), filter 0.3s ease !important;
+}
+
+.hud-minimap-shell,
+.hud-objective-shell {
+  position: relative;
+  z-index: 20;
+}
+
+
 
