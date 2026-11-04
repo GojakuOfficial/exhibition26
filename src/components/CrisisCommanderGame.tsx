@@ -200,6 +200,7 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
 
     // Main Game Loop
     let lastTime = performance.now();
+    let hudThrottleTimer = 0;
     const renderLoop = (time: number) => {
       const dt = Math.min(0.1, (time - lastTime) / 1000);
       lastTime = time;
@@ -230,21 +231,27 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
         // Update city systems (train, wind turbines, vehicles)
         cityScene.update(dt);
 
-        // Calculate proximity to sector stations
-        let foundStation: SectorStation | null = null;
-        for (let i = 0; i < cityScene.sectorStations.length; i++) {
-          const st = cityScene.sectorStations[i];
-          const dist = Math.hypot(char.state.x - st.terminalCoords[0], char.state.z - st.terminalCoords[2]);
-          if (dist <= 8.5) {
-            foundStation = st;
-            break;
-          }
-        }
-        setNearbyStation(foundStation);
+        // Throttle HUD and station updates to 20fps to avoid React render churn
+        hudThrottleTimer += dt;
+        if (hudThrottleTimer >= 0.05) {
+          hudThrottleTimer = 0;
 
-        // Update HUD state throttle
-        setPlayerHudState({ ...char.state });
-        setCameraHeading(camCtrl.getYaw());
+          // Calculate proximity to sector stations
+          let foundStation: SectorStation | null = null;
+          for (let i = 0; i < cityScene.sectorStations.length; i++) {
+            const st = cityScene.sectorStations[i];
+            const dist = Math.hypot(char.state.x - st.terminalCoords[0], char.state.z - st.terminalCoords[2]);
+            if (dist <= 8.5) {
+              foundStation = st;
+              break;
+            }
+          }
+          setNearbyStation(prev => (prev?.id === foundStation?.id ? prev : foundStation));
+
+          // Update HUD state throttle
+          setPlayerHudState({ ...char.state });
+          setCameraHeading(camCtrl.getYaw());
+        }
       }
 
       cityScene.renderer.render(cityScene.scene, cityScene.camera);
@@ -331,7 +338,11 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
     };
 
     const handleMouseMove = (e: MouseEvent) => {
-      if (document.pointerLockElement === mountRef.current && cameraControllerRef.current) {
+      const isLocked =
+        document.pointerLockElement === mountRef.current ||
+        (mountRef.current && mountRef.current.contains(document.pointerLockElement)) ||
+        document.pointerLockElement === containerRef.current;
+      if (isLocked && cameraControllerRef.current) {
         cameraControllerRef.current.handleMouseMove(e.movementX, e.movementY);
       }
     };
@@ -343,8 +354,11 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
     };
 
     const handlePointerLockChange = () => {
-      const locked = document.pointerLockElement === mountRef.current;
-      setIsPointerLocked(locked);
+      const isLocked =
+        document.pointerLockElement === mountRef.current ||
+        (mountRef.current && mountRef.current.contains(document.pointerLockElement)) ||
+        document.pointerLockElement === containerRef.current;
+      setIsPointerLocked(!!isLocked);
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -364,8 +378,11 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
 
   // Request pointer lock on viewport click
   const handleViewportClick = () => {
-    if (gameMode === 'playing' && !activePuzzle && mountRef.current) {
-      mountRef.current.requestPointerLock?.();
+    if (gameModeRef.current === 'playing' && !activePuzzleRef.current && mountRef.current) {
+      try {
+        const target = mountRef.current.querySelector('canvas') || mountRef.current;
+        target?.requestPointerLock?.();
+      } catch (_) {}
     }
   };
 
@@ -539,9 +556,13 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
       }
     }
 
-    try {
-      mountRef.current?.requestPointerLock?.();
-    } catch (_) {}
+    // Delay pointer lock slightly so it does not collide with the browser's fullscreen transition
+    setTimeout(() => {
+      try {
+        const target = mountRef.current?.querySelector('canvas') || mountRef.current;
+        target?.requestPointerLock?.();
+      } catch (_) {}
+    }, 250);
   };
 
   const handleRestart = () => {
@@ -630,18 +651,8 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
   const timerRingDashoffset = timerRingCircumference * (1 - timerProgressFraction);
 
   return (
-    <section id="game-section" className="page-section game-rebuild-section" style={{ paddingTop: '2.5rem' }}>
-      <div className="container">
-        {/* Section Lead */}
-        <div className="section-eyebrow">THIRD-PERSON METROPOLITAN DEFENSE ADVENTURE</div>
-        <h2 className="section-heading-lg">NEXUS 2040: Crisis Commander.</h2>
-        <p className="section-subtext">
-          Control India&rsquo;s autonomous cybernetic field engineer in real-time 3D. Explore the living city streets, navigate to active crisis beacons, and solve five critical engineering puzzles to restore stability before the 180-second crisis timer expires.
-        </p>
-
-        {/* Game Master Container */}
-        <div ref={containerRef} className={`commander-viewport-frame ${isFullscreen ? 'is-fullscreen' : ''}`}>
-          {/* Top Bar */}
+    <div ref={containerRef} className={`commander-viewport-frame ${isFullscreen ? 'is-fullscreen' : ''}`}>
+      {/* Top Bar */}
           <div className="commander-topbar">
             <div className="topbar-left">
               <span className="commander-badge">NEXUS 2040 // CRISIS EXPLORER</span>
@@ -703,11 +714,16 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
 
           {/* 3D Scene Viewport Canvas */}
           <div
-            ref={mountRef}
             className={`commander-canvas-stage ${isPointerLocked ? 'is-locked' : ''}`}
             onClick={handleViewportClick}
             aria-label="Interactive 3D Third-Person City Experience"
           >
+            {/* Dedicated Three.js canvas mount container - kept EMPTY for Three.js */}
+            <div
+              ref={mountRef}
+              className="commander-canvas-mount"
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+            />
             {/* Cinematic Film Vignette & Warm Golden Hour Grade Overlay */}
             <div
               className="cinematic-vignette-overlay"
@@ -1196,7 +1212,5 @@ export const CrisisCommanderGame: React.FC<CrisisCommanderGameProps> = ({
             />
           )}
         </div>
-      </div>
-    </section>
   );
 };

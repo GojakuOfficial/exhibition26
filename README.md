@@ -48,3 +48,24 @@ npm run build
 # Run TypeScript checks
 npm run lint
 ```
+
+## Offline Local Launch (No Cloud / No Studio Required)
+
+This repository includes zero-dependency offline launchers that automatically start a local server and open your default browser with 100% feature support (WebGL, Web Audio, Fullscreen, Pointer Lock, and AI Protocols):
+
+### Windows
+Double-click `launch-windows.bat` in the project root.
+
+### macOS & Linux
+Double-click or run `launch-mac-linux.sh`:
+```bash
+./launch-mac-linux.sh
+```
+
+### Any System with Node.js
+```bash
+npm run serve:offline
+# or directly:
+node launch.js
+```
+The launcher automatically verifies that `dist/` is built (building it if missing), serves the application with full MIME types, and launches your browser to `http://localhost:8080`.
